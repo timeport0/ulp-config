@@ -123,7 +123,38 @@ class ULP:
         raise TimeoutError(f"no {token!r} response within {global_timeout}s")
 
     # --- session steps -------------------------------------------------
-    def catch_boot(self, timeout=120):
+    def soft_reset(self, op_baud: str, timeout=10) -> bool:
+        """Try to reboot the sensor by sending $RESET at its operating baud.
+        Returns True if the boot beacon was caught (no power cycle needed)."""
+        print(f"Attempting soft reset at {op_baud} baud...")
+        self.ser.baudrate = int(op_baud)
+        deadline = time.time() + timeout
+        try:
+            while time.time() < deadline:
+                self.ser.write(frame("RESET94399"))
+                self.log(f"  -> {frame('RESET94399')!r} @ {op_baud}")
+                time.sleep(0.2)
+                # beacon comes at CONFIG_BAUD; hop over and listen briefly
+                self.ser.baudrate = CONFIG_BAUD
+                sent = time.time()
+                while time.time() - sent < 1.5:
+                    ln = self.ser.readline()
+                    if ln:
+                        self.log(f"  <- {ln!r}")
+                        if b"START_CONF" in ln.upper():
+                            print("Soft reset worked - ULP entered config mode.")
+                            return True
+                self.ser.baudrate = int(op_baud)
+            return False
+        finally:
+            self.ser.baudrate = CONFIG_BAUD
+
+    def catch_boot(self, timeout=120, soft_baud=None):
+        if soft_baud and self.soft_reset(soft_baud):
+            return
+        if soft_baud:
+            print("Soft reset not accepted by this firmware - falling back "
+                  "to manual power cycle.")
         print("\nDisconnect the BROWN (power) wire now if it's connected.")
         input("Press Enter, then reconnect BROWN when told... ")
         print(">>> Connect the BROWN wire NOW - waiting for boot beacon...")
@@ -185,6 +216,9 @@ def main():
     p.add_argument("--filter", dest="filt", choices=FILTERS, help="wind filter")
     p.add_argument("--units", choices=UNITS, help="wind speed units")
     p.add_argument("-q", "--quiet", action="store_true", help="hide raw serial traffic")
+    p.add_argument("--soft-reset", metavar="OP_BAUD", dest="soft",
+                   help="first try $RESET at the sensor's current operating baud "
+                        "(e.g. 38400) to enter config mode without a power cycle")
     args = p.parse_args()
 
     if args.monitor:
@@ -195,7 +229,7 @@ def main():
         p.error("either --info, --monitor, or --mode <...> is required")
 
     ulp = ULP(args.port, verbose=not args.quiet)
-    ulp.catch_boot()
+    ulp.catch_boot(soft_baud=args.soft)
     uid, hw, fw = ulp.read_info()
     print(f"\nSerial Number: {uid.decode(errors='replace').strip()}")
     print(f"Hardware:      {hw.decode(errors='replace').strip()}")
