@@ -85,14 +85,8 @@ def rate_cmd(rate: str) -> bytes:
 
 
 def baud_cmd(baud: str) -> bytes:
-    # replicate vendor zero-padding exactly: 5-digit -> 00xxxxx, 6-digit -> 0xxxxxx
-    if len(baud) == 5:
-        msg = "BAUDRATE_00" + baud
-    elif len(baud) == 6:
-        msg = "BAUDRATE_0" + baud
-    else:
-        msg = "BAUDRATE_" + baud
-    return frame(msg)
+    # 6-digit zero-padded field: 9600 -> 009600, 38400 -> 038400, 115200 -> 115200
+    return frame("BAUDRATE_" + baud.zfill(6))
 
 
 class ULP:
@@ -118,6 +112,12 @@ class ULP:
                 ln = self.ser.readline()
                 if ln:
                     self.log(f"  <- {ln!r}")
+                    if b"STOP_CONFIG" in ln.upper():
+                        raise RuntimeError(
+                            "Sensor left config mode ($STOP_CONFIG) - the config "
+                            "window expires ~5s after the last accepted command, "
+                            "so a command was probably rejected. Redo the brown-wire "
+                            "power cycle and try again.")
                     if token.upper() in ln.upper():
                         return ln
         raise TimeoutError(f"no {token!r} response within {global_timeout}s")
