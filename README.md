@@ -41,3 +41,7 @@ walks you through the brown-wire power cycle when it needs one, and
 
 Run `./ulp_config.py --help` for every option. See the docstring at the top
 of the script for how the config window behaves.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
